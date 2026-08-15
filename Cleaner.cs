@@ -519,7 +519,7 @@ namespace WindowsFormsApp1
                     BackupManager.BackupFile(item.Path, item.Type, item.Name);
                     TryDeleteFile(item.Path);
                 }
-                return "恶意快捷方式已删除，请从开始菜单重新创建";
+                return "失效快捷方式已删除，请从开始菜单重新创建";
             }
             catch (Exception ex)
             {
