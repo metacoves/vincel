@@ -27,6 +27,9 @@ namespace WindowsFormsApp1
         public MainForm()
         {
             InitializeComponent();
+            // 窗口图标与exe图标统一（vincel.ico，已嵌入exe）
+            try { this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch { }
             _jsBridge = new JsBridge(this);
 
             // 初始化安装包监控，默认开启
