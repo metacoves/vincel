@@ -1,10 +1,19 @@
 # 深澈 Vincel
 
+> 官网：https://vincel.netlify.app/
+
 > 新机到手，一键清爽。专门清理国内捆绑软件和品牌预装冗余软件的系统优化工具。
 
 ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%207%2B-lightgrey.svg)
 ![.NET](https://img.shields.io/badge/.NET-Framework%204.7.2-informational.svg)
+
+> ⭐ 如果这个项目对你有帮助，欢迎点亮 Star，你的支持是持续更新的动力。
+
+## 下载
+
+- 🖥️ 官网下载（安装版 / 绿色版）：https://vincel.netlify.app/
+- 📦 GitHub Releases（安装包 + 绿色版 zip）：https://github.com/metacoves/vincel/releases
 
 ## 项目介绍
 
@@ -12,10 +21,14 @@
 
 核心代码开源透明，无广告、无捆绑、无后门，所有清理操作自动备份，可一键撤销。
 
+## 界面预览
+
+![主界面截图](screenshot.png)
+
 ## 核心功能
 
 ### 免费版（GPLv3 开源）
-- 🧹 **一键强制卸载**：深度扫描捆绑软件、品牌预装、后台服务、计划任务、注册表残留和文件垃圾，使用管理员权限彻底删除
+- 🧹 **一键强制卸载**：深度扫描捆绑软件、品牌预装、后台服务、计划任务、注册表残留和文件垃圾，管理员权限彻底删除
 - 💾 **自动备份可撤销**：清理前自动备份文件和注册表，误删可一键恢复
 - 📦 **安装包监控**：实时监控安装包运行，提醒捆绑风险，只提醒不拦截
 - 📊 **弹窗来源统计**：统计广告弹窗来源，只统计不关闭
@@ -47,7 +60,7 @@
 ### 构建步骤
 1. 克隆仓库
    ```bash
-   git clone https://github.com/你的用户名/vincel.git
+   git clone https://github.com/metacoves/vincel.git
    cd vincel
    ```
 2. 用 Visual Studio 打开 `vincel.slnx`
