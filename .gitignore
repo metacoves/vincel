@@ -1,0 +1,50 @@
+# 编译产物
+bin/
+obj/
+.vs/
+
+# 用户配置
+*.user
+*.suo
+*.userprefs
+*.userosscache
+*.sln.docstates
+
+# 临时文件
+*.log
+*.tmp
+*.temp
+
+# WebView2 缓存
+VincelWebView/
+*/VincelWebView/
+wwwroot/VincelWebView/
+
+# 官网（单独仓库 vincel-website 维护）
+官网站点/
+
+# 发布包（安装包放GitHub Release，不进git）
+发布包/
+WebView2Runtime/
+*.zip
+*.exe
+*.msi
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 本地配置（含用户数据）
+vincel_config.txt
+device_id.txt
+ball_config.txt
+popup_stats.txt
+install_stats.txt
+agreement.txt
