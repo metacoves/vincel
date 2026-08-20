@@ -16,6 +16,7 @@ namespace WindowsFormsApp1
         private FloatingBall _floatingBall;
         private bool _floatBallEnabled = true;
         private LocalWebServer _localServer;
+        private bool _pendingInstallNotice;
         private static readonly string ConfigPath = Path.Combine(Application.LocalUserAppDataPath, "vincel_config.txt");
 
         // 窗口圆角和阴影API
@@ -32,14 +33,20 @@ namespace WindowsFormsApp1
             catch { }
             _jsBridge = new JsBridge(this);
 
-            // 初始化安装包监控，默认开启
+            // 初始化安装程序监控，默认开启
             _installWatcher = new InstallWatcher();
             _installWatcher.InstallerDetected += () =>
             {
-                // 检测到安装包，调用前端显示通知
+                // 检测到安装程序，调用前端显示通知
                 if (webView?.CoreWebView2 != null)
                 {
-                    webView.CoreWebView2.ExecuteScriptAsync("showInstallNotice()");
+                    try { webView.CoreWebView2.ExecuteScriptAsync("showInstallNotice()"); }
+                    catch { }
+                }
+                else
+                {
+                    // WebView2 还没初始化完成，标记待显示，初始化后再弹
+                    _pendingInstallNotice = true;
                 }
             };
             _installWatcher.Enabled = true;
@@ -130,6 +137,17 @@ namespace WindowsFormsApp1
             // 加载本地页面（本地HTTP服务）
             webView.CoreWebView2.Navigate(LocalWebServer.RootUrl);
 
+            // 页面加载完成后，如果有待显示的安装程序通知，补弹
+            webView.CoreWebView2.NavigationCompleted += (s, e) =>
+            {
+                if (_pendingInstallNotice && webView?.CoreWebView2 != null)
+                {
+                    _pendingInstallNotice = false;
+                    try { webView.CoreWebView2.ExecuteScriptAsync("showInstallNotice()"); }
+                    catch { }
+                }
+            };
+
             // 禁用不需要的功能，更像原生应用
             webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
@@ -187,10 +205,16 @@ namespace WindowsFormsApp1
             return _floatBallEnabled;
         }
 
-        /// <summary>获取今日检测到的安装包数量（悬浮球提示用）</summary>
+        /// <summary>获取今日检测到的安装程序数量（悬浮球提示用）</summary>
         public int GetInstallTodayCount()
         {
             return _installWatcher?.TodayCount ?? 0;
+        }
+
+        /// <summary>获取累计检测到的安装程序数量</summary>
+        public int GetInstallTotalCount()
+        {
+            return _installWatcher?.TotalCount ?? 0;
         }
 
         /// <summary>读配置</summary>

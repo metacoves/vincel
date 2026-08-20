@@ -13,7 +13,7 @@
 ## 下载
 
 - 🖥️ 官网下载（安装版 / 绿色版）：https://vincel.netlify.app/
-- 📦 GitHub Releases（安装包 + 绿色版 zip）：https://github.com/metacoves/vincel/releases
+- 📦 GitHub Releases（安装程序 + 绿色版 zip）：https://github.com/metacoves/vincel/releases
 
 ## 项目介绍
 
@@ -29,15 +29,15 @@
 
 ### 免费版（GPLv3 开源）
 - 🧹 **一键强制卸载**：深度扫描捆绑软件、品牌预装、后台服务、计划任务、注册表残留和文件垃圾，管理员权限彻底删除
-- 💾 **自动备份可撤销**：清理前自动备份文件和注册表，误删可一键恢复
-- 📦 **安装包监控**：实时监控安装包运行，提醒捆绑风险，只提醒不拦截
+- 💾 **自动备份可撤销**：清理前自动备份文件和注册表，误删可一键恢复（多数清理工具卸载后不可恢复，这是深澈的核心差异）
+- 📦 **安装程序监控**：实时监控安装程序运行，提醒捆绑风险，只提醒不拦截
 - 📊 **弹窗来源统计**：统计广告弹窗来源，只统计不关闭
 - ⚡ **开机自启管理**：管理开机启动项，加快开机速度
-- 🎈 **桌面悬浮球**：一键快速扫描，实时显示今日弹窗和安装包检测数
+- 🎈 **桌面悬浮球**：一键快速扫描，实时显示今日弹窗和安装程序检测数
 - 📚 **特征库手动更新**：300+ 捆绑与预装软件特征，持续更新
 
 ### 专业版（商业闭源，独立插件）
-- 🛡️ **安装包实时拦截**：自动拦截捆绑软件偷偷安装
+- 🛡️ **安装程序实时拦截**：自动拦截捆绑软件偷偷安装
 - 🔕 **智能弹窗拦截**：自动关闭广告弹窗
 - 🏠 **主页篡改防护**：防止浏览器主页被篡改
 - 👁️ **进程行为监控**：监控可疑进程行为
@@ -48,7 +48,7 @@
 
 - **操作系统**：Windows 7 / 8 / 10 / 11（32/64 位）
 - **运行环境**：.NET Framework 4.7.2（Win10/11 自带，Win7/8 需安装）
-- **WebView2**：微软 Edge WebView2 运行时（Win11 自带，其他系统安装包会自动安装）
+- **WebView2**：微软 Edge WebView2 运行时（Win11 自带，其他系统安装程序会自动安装）
 - **磁盘空间**：≥ 50MB
 
 ## 构建说明
@@ -68,11 +68,11 @@
 4. 按 F5 编译运行，或右键项目 → 生成
 
 ### 发布构建
-运行 `build-release.ps1` 或 `发版.bat` 生成发布版本（安装包 + 绿色版 zip）。
+运行 `build-release.ps1` 或 `发版.bat` 生成发布版本（安装程序 + 绿色版 zip）。
 
 前置条件：
 1. 安装 **Inno Setup 6**（https://jrsoftware.org/isdl.php）
-2. 从微软官方下载 **WebView2 Evergreen 引导安装包**（https://go.microsoft.com/fwlink/p/?LinkId=2124703），命名为 `MicrosoftEdgeWebview2Setup.exe` 放入 `WebView2Runtime\` 目录（该文件不随仓库分发，已被 `.gitignore` 忽略；缺失时绿色版将不含 WebView2 引导，安装版编译会失败）
+2. 从微软官方下载 **WebView2 Evergreen 引导安装程序**（https://go.microsoft.com/fwlink/p/?LinkId=2124703），命名为 `MicrosoftEdgeWebview2Setup.exe` 放入 `WebView2Runtime\` 目录（该文件不随仓库分发，已被 `.gitignore` 忽略；缺失时绿色版将不含 WebView2 引导，安装版编译会失败）
 
 ## 项目结构
 
@@ -81,7 +81,7 @@
 ├── Cleaner.cs              # 强制卸载引擎
 ├── BackupManager.cs        # 备份与撤销管理
 ├── Signatures.cs           # 捆绑与预装软件特征库
-├── InstallWatcher.cs       # 安装包监控
+├── InstallWatcher.cs       # 安装程序监控
 ├── PopupCounter.cs         # 弹窗统计
 ├── FloatingBall.cs         # 桌面悬浮球
 ├── MainForm.cs             # 主窗口（WebView2 宿主）
