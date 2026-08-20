@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace WindowsFormsApp1
 {
     /// <summary>
-    /// 安装包运行提醒（免费版功能）。
+    /// 安装程序运行提醒（免费版功能）。
     /// 通过 WMI Win32_ProcessStartTrace 后台监控新进程创建，
     /// 检测到可能的安装程序时触发事件，由前端显示WebView2风格通知，只提醒不拦截。
     /// </summary>
@@ -24,10 +24,10 @@ namespace WindowsFormsApp1
         // 检测到安装程序时触发的事件，主窗体订阅后执行JS显示通知
         public event Action InstallerDetected;
 
-        /// <summary>今日检测到的安装包数量</summary>
+        /// <summary>今日检测到的安装程序数量</summary>
         public int TodayCount => _todayCount;
 
-        /// <summary>累计检测到的安装包数量</summary>
+        /// <summary>累计检测到的安装程序数量</summary>
         public int TotalCount => _totalCount + _todayCount;
 
         // 常见安装程序文件名关键字（大小写不敏感）

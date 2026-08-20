@@ -725,13 +725,13 @@ namespace WindowsFormsApp1
         {
             string text;
             if (_count > 0 && _installCount > 0)
-                text = string.Format("今日检测到 {0} 个弹窗，{1} 个安装包", _count, _installCount);
+                text = string.Format("今日检测到 {0} 个弹窗，{1} 个安装程序", _count, _installCount);
             else if (_count > 0)
                 text = string.Format("今日检测到 {0} 个广告弹窗", _count);
             else if (_installCount > 0)
-                text = string.Format("今日检测到 {0} 个安装包运行", _installCount);
+                text = string.Format("今日检测到 {0} 个安装程序运行", _installCount);
             else
-                text = "今日暂未检测到弹窗和安装包";
+                text = "今日暂未检测到弹窗和安装程序";
 
             using (var font = new Font(UiFamily, TIP_FONT_PX, FontStyle.Regular, GraphicsUnit.Pixel))
             using (var sf = new StringFormat

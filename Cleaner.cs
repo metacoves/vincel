@@ -1,9 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -111,6 +113,7 @@ namespace WindowsFormsApp1
             var exePath = ExtractExePath(item.Path);
             bool exeProtected = IsProtectedPath(exePath);
             bool stopped = false;
+            string stopError = null;
 
             try
             {
@@ -131,14 +134,19 @@ namespace WindowsFormsApp1
                     stopped = true;
                 }
             }
-            catch { }
-
-            // 停服后可能还有托盘/守护进程占用 exe，先杀掉同名进程，避免文件占用删不掉（与 CleanStartup 一致）
-            if (!exeProtected && !string.IsNullOrEmpty(exePath))
+            catch (Exception ex)
             {
-                try { KillProcessByPath(exePath); } catch { }
+                stopError = ex.Message;
             }
 
+            // 停服后可能还有托盘/守护进程占用 exe，先杀掉同名进程，避免文件占用删不掉（与 CleanStartup 一致）
+            bool processKilled = true;
+            if (!exeProtected && !string.IsNullOrEmpty(exePath))
+            {
+                processKilled = TryKillProcessByPath(exePath);
+            }
+
+            int scExitCode = 0;
             try
             {
                 var proc = Process.Start(new ProcessStartInfo
@@ -153,16 +161,23 @@ namespace WindowsFormsApp1
                 if (proc != null)
                 {
                     proc.WaitForExit(8000);
-                    // 1072 = 服务已标记为删除：服务仍在停止中，重启后自动消失，算成功不算失败
-                    if (proc.HasExited && proc.ExitCode != 0 && proc.ExitCode != 1072)
-                    {
-                        return $"失败: sc.exe 返回错误码 {proc.ExitCode}";
-                    }
+                    if (proc.HasExited) scExitCode = proc.ExitCode;
                 }
             }
             catch (Exception ex)
             {
                 return $"失败: 删除服务时出错 {ex.Message}";
+            }
+
+            // 1072 = 服务已标记为删除：服务仍在停止中，重启后自动消失，算成功不算失败
+            if (scExitCode != 0 && scExitCode != 1072)
+            {
+                // 服务停止失败 + 删除失败 = 很可能有自我保护
+                if (!stopped || !processKilled)
+                {
+                    return $"失败: 该服务可能有自我保护，普通权限无法停止/删除。请先在软件设置中关闭自我保护，或重启到安全模式后再清理（错误码 {scExitCode}）";
+                }
+                return $"失败: sc.exe 返回错误码 {scExitCode}";
             }
 
             if (exeProtected)
@@ -181,6 +196,12 @@ namespace WindowsFormsApp1
                 }
             }
             catch { }
+
+            // 服务标记删除了但进程没杀掉，提示重启
+            if (!processKilled && !string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                return "服务已停止并标记删除（重启后彻底消失）";
+            }
 
             return "服务已停止并标记删除（重启后彻底消失）";
         }
@@ -215,11 +236,7 @@ namespace WindowsFormsApp1
 
             if (!exeProtected && !string.IsNullOrEmpty(exePath))
             {
-                try
-                {
-                    KillProcessByPath(exePath);
-                }
-                catch { }
+                TryKillProcessByPath(exePath);
             }
 
             if (exeProtected)
@@ -240,8 +257,9 @@ namespace WindowsFormsApp1
             return "启动项已删除";
         }
 
-        private static void KillProcessByPath(string exePath)
+        private static bool TryKillProcessByPath(string exePath)
         {
+            bool killed = true;
             try
             {
                 var targetPath = Path.GetFullPath(exePath).ToLower();
@@ -253,7 +271,14 @@ namespace WindowsFormsApp1
                         if (!string.IsNullOrEmpty(procPath) &&
                             Path.GetFullPath(procPath).ToLower() == targetPath)
                         {
-                            proc.Kill();
+                            try
+                            {
+                                proc.Kill();
+                            }
+                            catch
+                            {
+                                killed = false; // 进程有自我保护，杀不掉
+                            }
                         }
                     }
                     catch { }
@@ -261,6 +286,7 @@ namespace WindowsFormsApp1
                 }
             }
             catch { }
+            return killed;
         }
 
         private static void DeleteRunValue(RegistryKey root, ScanResult item, string runPath = @"Software\Microsoft\Windows\CurrentVersion\Run")
@@ -318,10 +344,69 @@ namespace WindowsFormsApp1
             }
         }
 
+
+        // ============================================================
+        // SeTakeOwnershipPrivilege：夺取注册表所有权前必须先启用该特权，
+        // 否则 OpenSubKey(TakeOwnership) 会因权限不足直接失败（360锁定的键）。
+        // ============================================================
+        private const uint TOKEN_QUERY = 0x0008;
+        private const uint TOKEN_ADJUST_PRIVILEGES = 0x0020;
+        private const uint SE_PRIVILEGE_ENABLED = 0x00000002;
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool LookupPrivilegeValue(string systemName, string name, out long luid);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool AdjustTokenPrivileges(IntPtr tokenHandle, bool disableAllPrivileges,
+            ref TOKEN_PRIVILEGES newState, uint bufferLength, IntPtr previousState, IntPtr returnLength);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct TOKEN_PRIVILEGES
+        {
+            public uint PrivilegeCount;
+            public long Luid;
+            public uint Attributes;
+        }
+
+        private static void EnableTakeOwnershipPrivilege()
+        {
+            try
+            {
+                IntPtr token;
+                if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out token)) return;
+                try
+                {
+                    long luid;
+                    if (!LookupPrivilegeValue(null, "SeTakeOwnershipPrivilege", out luid)) return;
+                    var tp = new TOKEN_PRIVILEGES { PrivilegeCount = 1, Luid = luid, Attributes = SE_PRIVILEGE_ENABLED };
+                    AdjustTokenPrivileges(token, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+                }
+                finally
+                {
+                    CloseHandle(token);
+                }
+            }
+            catch
+            {
+                // 启用特权失败（非管理员等），后续操作会返回明确错误
+            }
+        }
+
         private static string CleanBrowser(ScanResult item)
         {
             try
             {
+                // IE 主页：360等软件会锁定注册表权限，先尝试夺取权限再修改
+                TryTakeRegistryOwnership(Registry.CurrentUser, @"Software\Microsoft\Internet Explorer\Main");
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Internet Explorer\Main", true))
                 {
                     if (key != null && key.GetValue("Start Page") != null)
@@ -488,6 +573,8 @@ namespace WindowsFormsApp1
         {
             try
             {
+                // 360等软件会锁定策略注册表项权限，先夺取权限
+                TryTakeRegistryOwnership(root, policyPath);
                 using (var key = root.OpenSubKey(policyPath, true))
                 {
                     if (key == null) return;
@@ -570,15 +657,19 @@ namespace WindowsFormsApp1
 
                 if (!Directory.Exists(item.Path)) return "目录不存在，跳过";
 
-                KillProcessesInDirectory(item.Path);
+                bool allKilled = TryKillProcessesInDirectory(item.Path);
 
                 BackupManager.BackupDirectory(item.Path, item.Type, item.Name);
 
                 TryDeleteDirectory(item.Path);
 
-                return Directory.Exists(item.Path)
-                    ? "目录被占用，已标记为重启后删除"
-                    : "目录已删除";
+                if (Directory.Exists(item.Path))
+                {
+                    if (!allKilled)
+                        return "目录被占用且进程无法结束（可能有自我保护），已标记为重启后删除";
+                    return "目录被占用，已标记为重启后删除";
+                }
+                return "目录已删除";
             }
             catch (Exception ex)
             {
@@ -594,11 +685,12 @@ namespace WindowsFormsApp1
             }
         }
 
-        private static void KillProcessesInDirectory(string path)
+        private static bool TryKillProcessesInDirectory(string path)
         {
+            bool allKilled = true;
             try
             {
-                if (IsProtectedPath(path)) return;
+                if (IsProtectedPath(path)) return true;
 
                 var prefix = Path.GetFullPath(path).TrimEnd('\\') + "\\";
 
@@ -610,7 +702,14 @@ namespace WindowsFormsApp1
                         if (!string.IsNullOrEmpty(exe) &&
                             exe.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                         {
-                            proc.Kill();
+                            try
+                            {
+                                proc.Kill();
+                            }
+                            catch
+                            {
+                                allKilled = false; // 进程有自我保护
+                            }
                         }
                     }
                     catch { }
@@ -618,6 +717,7 @@ namespace WindowsFormsApp1
                 }
             }
             catch { }
+            return allKilled;
         }
 
         private static void TryDeleteFile(string path)
@@ -675,6 +775,225 @@ namespace WindowsFormsApp1
                 MoveFileEx(path, null, MOVEFILE_DELAY_UNTIL_REBOOT);
             }
             catch { }
+        }
+
+        // ============================================================
+        // 智能卸载：优先调用软件自带卸载程序（对付360等有自我保护的软件）
+        // ============================================================
+
+        /// <summary>
+        /// 根据软件名关键词在注册表中查找自带卸载命令。
+        /// 搜索 HKLM/HKCU 的 Uninstall 键，匹配 DisplayName。
+        /// </summary>
+        private static string FindUninstallString(string keyword)
+        {
+            if (string.IsNullOrWhiteSpace(keyword)) return null;
+
+            var uninstallPaths = new[]
+            {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            };
+
+            foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
+            {
+                foreach (var path in uninstallPaths)
+                {
+                    try
+                    {
+                        using (var key = root.OpenSubKey(path))
+                        {
+                            if (key == null) continue;
+                            foreach (var subKeyName in key.GetSubKeyNames())
+                            {
+                                try
+                                {
+                                    using (var subKey = key.OpenSubKey(subKeyName))
+                                    {
+                                        if (subKey == null) continue;
+                                        var displayName = subKey.GetValue("DisplayName") as string;
+                                        if (string.IsNullOrEmpty(displayName)) continue;
+
+                                        // 关键词匹配（包含关系，不区分大小写）
+                                        if (displayName.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0)
+                                            continue;
+
+                                        // 优先使用 QuietUninstallString（静默卸载），没有则用 UninstallString
+                                        var quiet = subKey.GetValue("QuietUninstallString") as string;
+                                        var normal = subKey.GetValue("UninstallString") as string;
+                                        var cmd = !string.IsNullOrEmpty(quiet) ? quiet : normal;
+                                        if (!string.IsNullOrEmpty(cmd)) return cmd;
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 执行自带卸载程序，等待用户完成卸载向导。
+        /// 返回 true 表示卸载程序已启动（不代表卸载成功，需后续扫描残留确认）。
+        /// </summary>
+        private static bool RunNativeUninstaller(string uninstallCommand)
+        {
+            try
+            {
+                // 解析卸载命令：可能是 "C:\path\uninstall.exe" /S 或 MsiExec.exe /X{GUID}
+                string fileName;
+                string arguments;
+
+                var cmd = uninstallCommand.Trim();
+                if (cmd.StartsWith("\""))
+                {
+                    var endQuote = cmd.IndexOf('"', 1);
+                    if (endQuote > 0)
+                    {
+                        fileName = cmd.Substring(1, endQuote - 1);
+                        arguments = cmd.Substring(endQuote + 1).Trim();
+                    }
+                    else
+                    {
+                        fileName = cmd;
+                        arguments = "";
+                    }
+                }
+                else
+                {
+                    var space = cmd.IndexOf(' ');
+                    if (space > 0)
+                    {
+                        fileName = cmd.Substring(0, space);
+                        arguments = cmd.Substring(space + 1);
+                    }
+                    else
+                    {
+                        fileName = cmd;
+                        arguments = "";
+                    }
+                }
+
+                // MsiExec 标准卸载：/I{GUID} 是维护模式（修复/修改），必须转为 /X{GUID} 卸载模式，并加 /quiet 静默
+                if (fileName.EndsWith("msiexec.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    arguments = System.Text.RegularExpressions.Regex.Replace(arguments, @"/[iI]\{", "/X{");
+                    if (!arguments.Contains("/quiet") && !arguments.Contains("/qn"))
+                    {
+                        arguments += " /quiet";
+                    }
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true // 自带卸载程序需要ShellExecute保证权限提升
+                };
+
+                var proc = Process.Start(psi);
+                if (proc == null) return false;
+
+                // 等待卸载程序退出（最多10分钟，用户可能需要手动点"下一步"）
+                proc.WaitForExit(600000);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 智能卸载：查找并调用软件自带卸载程序。
+        /// keyword 是用于匹配 DisplayName 的关键词（如 "360安全卫士"）。
+        /// 返回 JSON 字符串，包含是否找到卸载程序、是否执行成功。
+        /// </summary>
+        public static string SmartUninstall(string keyword)
+        {
+            var serializer = new JavaScriptSerializer();
+            try
+            {
+                var cmd = FindUninstallString(keyword);
+                if (string.IsNullOrEmpty(cmd))
+                {
+                    return serializer.Serialize(new
+                    {
+                        success = false,
+                        message = $"未找到「{keyword}」的自带卸载程序，将使用强制删除"
+                    });
+                }
+
+                var launched = RunNativeUninstaller(cmd);
+                if (!launched)
+                {
+                    return serializer.Serialize(new
+                    {
+                        success = false,
+                        message = $"自带卸载程序启动失败，请手动在控制面板卸载"
+                    });
+                }
+
+                return serializer.Serialize(new
+                {
+                    success = true,
+                    message = $"已启动「{keyword}」自带卸载程序，请在弹出的窗口中完成卸载，完成后点击确定扫描残留"
+                });
+            }
+            catch (Exception ex)
+            {
+                return serializer.Serialize(new { success = false, message = $"智能卸载出错: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// 尝试夺取注册表项所有权并授予当前用户完全控制权限。
+        /// 360等软件会锁定注册表ACL导致"未经授权的操作"，用这个方法突破。
+        /// </summary>
+        private static void TryTakeRegistryOwnership(RegistryKey root, string subKeyPath)
+        {
+            try
+            {
+                // 启用 SeTakeOwnershipPrivilege，否则 OpenSubKey(TakeOwnership) 会因权限不足直接失败
+                EnableTakeOwnershipPrivilege();
+                // 先以只读方式打开获取权限信息
+                using (var key = root.OpenSubKey(subKeyPath, RegistryKeyPermissionCheck.ReadWriteSubTree,
+                    RegistryRights.TakeOwnership | RegistryRights.ChangePermissions))
+                {
+                    if (key == null) return;
+
+                    var currentUser = WindowsIdentity.GetCurrent().User;
+                    var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+                    // 夺取所有权
+                    var ownership = new RegistrySecurity();
+                    ownership.SetOwner(currentUser);
+                    key.SetAccessControl(ownership);
+
+                    // 授予完全控制权限
+                    var access = new RegistrySecurity();
+                    access.AddAccessRule(new RegistryAccessRule(
+                        currentUser,
+                        RegistryRights.FullControl,
+                        InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                        PropagationFlags.None,
+                        AccessControlType.Allow));
+                    access.AddAccessRule(new RegistryAccessRule(
+                        admins,
+                        RegistryRights.FullControl,
+                        InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                        PropagationFlags.None,
+                        AccessControlType.Allow));
+                    key.SetAccessControl(access);
+                }
+            }
+            catch
+            {
+                // 夺取权限失败（可能需要更高权限），静默失败，后续操作会返回明确错误
+            }
         }
 
         private static string ExtractExePath(string command)
