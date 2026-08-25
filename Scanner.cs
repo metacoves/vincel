@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Xml;
 using Microsoft.Win32;
@@ -18,12 +19,56 @@ namespace WindowsFormsApp1
         public string Description { get; set; }
         public string TaskName { get; set; }
         public string ServiceName { get; set; }
+        public string UninstallString { get; set; }  // 已安装软件类型专用：注册表UninstallString
         public bool Checked { get; set; } = true;
         public string Result { get; set; } = "";
     }
 
     public static class Scanner
     {
+        // ============================================================
+        // 检测服务是否已被标记为删除（sc delete 后重启前仍会出现在服务列表中）
+        // ============================================================
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr OpenSCManager(string lpMachineName, string lpDatabaseName, uint dwDesiredAccess);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr OpenService(IntPtr hSCManager, string lpServiceName, uint dwDesiredAccess);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool CloseServiceHandle(IntPtr hSCObject);
+
+        private const uint SC_MANAGER_CONNECT = 0x0001;
+        private const uint SERVICE_QUERY_CONFIG = 0x0001;
+        private const int ERROR_SERVICE_MARKED_FOR_DELETE = 1072;
+
+        /// <summary>
+        /// 检查服务是否已被标记为删除（DeleteService 调用后、重启前，服务仍在列表中但实际已删除）。
+        /// </summary>
+        private static bool IsServiceMarkedForDelete(string serviceName)
+        {
+            try
+            {
+                IntPtr hSCM = OpenSCManager(null, null, SC_MANAGER_CONNECT);
+                if (hSCM == IntPtr.Zero) return false;
+                try
+                {
+                    // 已标记删除的服务，用 SERVICE_QUERY_CONFIG 打开会返回 NULL + 错误码 1072
+                    IntPtr hService = OpenService(hSCM, serviceName, SERVICE_QUERY_CONFIG);
+                    if (hService == IntPtr.Zero)
+                    {
+                        return Marshal.GetLastWin32Error() == ERROR_SERVICE_MARKED_FOR_DELETE;
+                    }
+                    CloseServiceHandle(hService);
+                    return false;
+                }
+                finally
+                {
+                    CloseServiceHandle(hSCM);
+                }
+            }
+            catch { return false; }
+        }
         public static List<ScanResult> ScanAll()
         {
             var results = new List<ScanResult>();
@@ -34,6 +79,7 @@ namespace WindowsFormsApp1
             results.AddRange(ScanBrowserShortcuts());
             results.AddRange(ScanContextMenu());
             results.AddRange(ScanAppData());
+            results.AddRange(ScanInstallApps());
             return results;
         }
 
@@ -105,6 +151,82 @@ namespace WindowsFormsApp1
             catch { }
         }
 
+        /// <summary>
+        /// 扫描已安装程序列表（注册表 Uninstall 键，与 Geek/BCU 同源）。
+        /// 只显示特征库匹配的问题软件，保持"只扫问题项"的定位。
+        /// </summary>
+        public static List<ScanResult> ScanInstallApps()
+        {
+            var results = new List<ScanResult>();
+            var roots = new[]
+            {
+                Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+                Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+                Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+            };
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var root in roots)
+            {
+                if (root == null) continue;
+                try
+                {
+                    foreach (var subName in root.GetSubKeyNames())
+                    {
+                        try
+                        {
+                            using (var sub = root.OpenSubKey(subName))
+                            {
+                                if (sub == null) continue;
+                                var displayName = sub.GetValue("DisplayName") as string;
+                                if (string.IsNullOrEmpty(displayName) || seen.Contains(displayName)) continue;
+
+                                var uninstallStr = sub.GetValue("UninstallString") as string ?? "";
+                                var installLocation = sub.GetValue("InstallLocation") as string ?? "";
+                                var path = !string.IsNullOrEmpty(installLocation)
+                                    ? installLocation
+                                    : ExtractExePathFromCmd(uninstallStr);
+
+                                // 特征库匹配（key + 描述前段）才显示；白名单在 IsBadSoftware 内部已优先
+                                if (IsBadSoftware(out string desc, out string risk, displayName, path, uninstallStr))
+                                {
+                                    seen.Add(displayName);
+                                    results.Add(new ScanResult
+                                    {
+                                        Name = displayName,
+                                        Path = path,
+                                        Type = "已安装软件",
+                                        RiskLevel = risk,
+                                        Description = desc,
+                                        UninstallString = uninstallStr
+                                    });
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+                finally { root.Dispose(); }
+            }
+            return results;
+        }
+
+        /// <summary>
+        /// 从卸载命令行中提取主程序路径（"C:\xx\uninst.exe" /S → C:\xx\uninst.exe）
+        /// </summary>
+        private static string ExtractExePathFromCmd(string cmd)
+        {
+            if (string.IsNullOrEmpty(cmd)) return "";
+            cmd = cmd.Trim();
+            if (cmd.StartsWith("\""))
+            {
+                var end = cmd.IndexOf('"', 1);
+                return end > 0 ? cmd.Substring(1, end - 1) : cmd.Trim('"');
+            }
+            var sp = cmd.IndexOf(' ');
+            return sp > 0 ? cmd.Substring(0, sp) : cmd;
+        }
+
         public static List<ScanResult> ScanServices()
         {
             var results = new List<ScanResult>();
@@ -114,6 +236,11 @@ namespace WindowsFormsApp1
                 {
                     try
                     {
+                        // 跳过已标记删除的服务（sc delete 后重启前仍在列表中，但实际已删除）
+                        if (IsServiceMarkedForDelete(sc.ServiceName)) continue;
+                        // 跳过本程序已成功删除的服务（比API检测更可靠）
+                        if (Cleaner.IsServiceDeleted(sc.ServiceName)) continue;
+
                         var path = GetServicePath(sc.ServiceName);
                         if (IsBadSoftware(out string desc, out string risk, sc.ServiceName, sc.DisplayName, path))
                         {
@@ -587,6 +714,16 @@ namespace WindowsFormsApp1
         // ============================================================
         // 核心判定逻辑（修复：按类型分配风险等级）
         // ============================================================
+
+        /// <summary>
+        /// 公共接口：判断进程名和路径是否匹配黑名单（用于清理时杀相关进程）。
+        /// </summary>
+        public static bool IsBadSoftwareForProcess(string processName, string exePath)
+        {
+            string desc, risk;
+            return IsBadSoftware(out desc, out risk, processName, exePath);
+        }
+
         private static bool IsBadSoftware(out string description, out string riskLevel, params string[] fields)
         {
             description = "";
@@ -621,12 +758,16 @@ namespace WindowsFormsApp1
             foreach (var kv in Signatures.BadKeywords)
             {
                 var k = kv.Key.ToLower();
-                if (k.Length <= badMatchLen) continue;
+                // 描述前段（"2345好压，含广告弹窗" → "2345好压"）作为别名匹配，
+                // 解决 key 是内部标识（如"2345zip"）、与显示名对不上的问题
+                var descHead = kv.Value.Split(new[] { '，', ',' })[0].Trim().ToLower();
+                if (descHead.Length < k.Length) descHead = k;
+                if (descHead.Length <= badMatchLen) continue;
                 foreach (var h in haystack)
                 {
-                    if (h.Contains(k))
+                    if (h.Contains(k) || h.Contains(descHead))
                     {
-                        badMatchLen = k.Length;
+                        badMatchLen = descHead.Length;
                         bestDesc = kv.Value;
                         bestKeyword = kv.Key;
                         break;

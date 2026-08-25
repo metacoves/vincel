@@ -98,6 +98,28 @@ namespace WindowsFormsApp1
                     int success = 0, fail = 0, skipped = 0, missing = 0;
                     var results = new List<object>();
 
+                    // 第一步：找出有自我保护的软件（360/金山/鲁大师等），先自动调用自带卸载程序
+                    var matchedItems = new List<ScanResult>();
+                    foreach (var target in selected)
+                    {
+                        var name = GetTargetField(target, "name");
+                        var path = GetTargetField(target, "path");
+                        var type = GetTargetField(target, "type");
+                        var item = FindScanResult(allResults, name, path, type);
+                        if (item != null) matchedItems.Add(item);
+                    }
+
+                    var nativeResults = Cleaner.PreCleanNativeUninstall(matchedItems);
+
+                    // 自带卸载程序可能已经删除/修改了部分项目，重新扫描获取最新状态
+                    if (nativeResults.Count > 0)
+                    {
+                        allResults = Scanner.ScanAll()
+                            .OrderByDescending(r => r.RiskLevel == "高" ? 2 : r.RiskLevel == "中" ? 1 : 0)
+                            .ToList();
+                    }
+
+                    // 第二步：逐项强制清理残留
                     foreach (var target in selected)
                     {
                         var name = GetTargetField(target, "name");
@@ -109,9 +131,9 @@ namespace WindowsFormsApp1
                         string result;
                         if (item == null)
                         {
-                            // 重新扫描后没找到对应项目（可能已被清理或已变化），跳过，绝不按索引乱删
+                            // 重新扫描后没找到对应项目——可能已被自带卸载程序删掉了，算成功
                             missing++;
-                            result = "未找到（可能已被清理或已变化），已跳过";
+                            result = "未找到（可能已被自带卸载程序清理），已跳过";
                         }
                         else
                         {
@@ -121,17 +143,63 @@ namespace WindowsFormsApp1
                             else success++;
                         }
 
+                        Cleaner.LogClean("清理", (type ?? "") + ":" + (name ?? "") + " -> " + result);
                         results.Add(new { name = name, path = path, type = type, result = result });
                     }
+
+                    // 第三步：重扫后自动清理与本次软件匹配的残留（无需用户再勾选）
+                    int autoCleaned = 0;
+                    if (nativeResults.Count > 0)
+                    {
+                        var cleanKeywords = matchedItems
+                            .Where(m => m != null && !string.IsNullOrEmpty(m.Name))
+                            .Select(m => m.Name.Length > 8 ? m.Name.Substring(0, 8) : m.Name)
+                            .ToList();
+                        if (cleanKeywords.Count > 0)
+                        {
+                            allResults = Scanner.ScanAll()
+                                .OrderByDescending(r => r.RiskLevel == "高" ? 2 : r.RiskLevel == "中" ? 1 : 0)
+                                .ToList();
+                            foreach (var r in allResults)
+                            {
+                                if (r.Type == "已安装软件") continue; // 软件本体需用户确认，不自动清
+                                bool hit = false;
+                                foreach (var kw in cleanKeywords)
+                                {
+                                    if ((r.Name ?? "").Contains(kw) || (r.Path ?? "").Contains(kw) || (r.Description ?? "").Contains(kw))
+                                    {
+                                        hit = true;
+                                        break;
+                                    }
+                                }
+                                if (!hit) continue;
+                                var rs = Cleaner.Clean(r);
+                                if (rs.StartsWith("失败")) fail++;
+                                else if (rs.StartsWith("跳过")) skipped++;
+                                else { success++; autoCleaned++; }
+                            }
+                            if (autoCleaned > 0)
+                            {
+                                nativeResults.Add(new KeyValuePair<string, string>("残留清理", "已自动清理残留 " + autoCleaned + " 项"));
+                            }
+                        }
+                    }
+
+                    Cleaner.LogClean("清理会话", string.Format("选中{0} 成功{1} 失败{2} 跳过{3} 自动清残留{4}", selected.Count, success, fail, skipped, autoCleaned));
 
                     BackupManager.SaveBackupLog();
 
                     // 匿名遥测：清理完成（只报成功数）
                     TelemetryService.Report("clean", success);
+
+                    var nativeSummary = nativeResults.Count > 0
+                        ? string.Join("；", nativeResults.Select(kv => $"「{kv.Key}」{kv.Value}"))
+                        : "";
+
                     return _json.Serialize(new
                     {
                         success = true,
-                        data = new { success, fail, skipped, missing, results }
+                        data = new { success, fail, skipped, missing, results, nativeUninstall = nativeSummary }
                     });
                 }
                 catch (Exception ex)
@@ -139,6 +207,16 @@ namespace WindowsFormsApp1
                     return _json.Serialize(new { success = false, error = ex.Message });
                 }
             });
+        }
+
+        /// <summary>
+        /// 智能卸载：调用软件自带卸载程序（对付360等有自我保护的软件）。
+        /// 前端调用：jsBridge.SmartUninstall("360安全卫士")
+        /// 会启动自带卸载向导，用户手动完成后，前端再触发扫描清理残留。
+        /// </summary>
+        public async Task<string> SmartUninstall(string keyword)
+        {
+            return await Task.Run(() => Cleaner.SmartUninstall(keyword ?? ""));
         }
 
         /// <summary>从前端传回的项目对象里取字段，键名大小写不敏感，null 安全。</summary>
@@ -194,9 +272,27 @@ namespace WindowsFormsApp1
                 PopupCounter.DoCount(); // 先执行一次实时统计
                 var today = PopupCounter.TotalToday;
                 var total = PopupCounter.TotalAll;
-                var week = today * 7; // 简单估算，后续可扩展周统计
+                var week = 0; // 周统计暂未实现（前端已隐藏本周卡片）
                 var stats = PopupCounter.Stats.ToDictionary(kv => kv.Key, kv => kv.Value);
                 return _json.Serialize(new { success = true, today, week, total, stats });
+            }
+            catch (Exception ex)
+            {
+                return _json.Serialize(new { success = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 获取安装包监控统计数据
+        /// </summary>
+        public string GetInstallStats()
+        {
+            try
+            {
+                var today = ((MainForm)_mainForm).GetInstallTodayCount();
+                var total = ((MainForm)_mainForm).GetInstallTotalCount();
+                var week = 0; // 周统计暂未实现（前端已隐藏本周卡片）
+                return _json.Serialize(new { success = true, today, week, total });
             }
             catch (Exception ex)
             {

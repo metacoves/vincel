@@ -660,16 +660,6 @@
         .tag-fail { background: var(--risk-high); color: white; }
         .tag-skip { background: var(--risk-mid); color: white; }
 
-        .path-text {
-            font-family: "SF Mono", Consolas, monospace;
-            font-size: 12px;
-            color: var(--ink-light);
-            max-width: 320px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
         /* 底部操作栏 */
         .footer-bar {
             height: 64px;
@@ -1503,17 +1493,16 @@
                                 <thead>
                                     <tr>
                                         <th style="width: 44px;"></th>
-                                        <th style="width: 18%;">软件名称</th>
+                                        <th style="width: 22%;">软件名称</th>
                                         <th style="width: 8%;">危险</th>
-                                        <th style="width: 22%;">说明</th>
-                                        <th style="width: 12%;">类型</th>
-                                        <th style="width: 26%;">路径</th>
-                                        <th style="width: 14%;">处理结果</th>
+                                        <th style="width: 38%;">说明</th>
+                                        <th style="width: 14%;">类型</th>
+                                        <th style="width: 18%;">处理结果</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tableBody">
                                     <tr>
-                                        <td colspan="7">
+                                        <td colspan="6">
                                             <div class="empty-state">
                                                 <div class="empty-icon">🛡️</div>
                                                 <div class="empty-text">点击「快速扫描」开始检测</div>
@@ -2700,7 +2689,7 @@
             if (scanResults.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7">
+                        <td colspan="6">
                             <div class="empty-state">
                                 <div class="empty-icon">✅</div>
                                 <div class="empty-text">没有发现可疑项，你的电脑很干净</div>
@@ -2721,11 +2710,6 @@
                     if (item.Result.startsWith('失败')) {
                         resultTag = `<span class="tag tag-fail">${item.Result}</span>`;
                         rowClass = 'result-fail';
-                        // 失败项显示智能卸载按钮（对付360等有自我保护的软件）
-                        const kw = extractKeyword(item.Name);
-                        if (kw) {
-                            resultTag += `<button class="btn btn-primary btn-sm" style="margin-left:6px;padding:2px 10px;font-size:12px;" onclick="smartUninstall('${kw}')">智能卸载</button>`;
-                        }
                     } else if (item.Result.startsWith('跳过')) {
                         resultTag = `<span class="tag tag-skip">${item.Result}</span>`;
                         rowClass = 'result-skip';
@@ -2744,7 +2728,6 @@
                         </td>
                         <td>${item.Description}</td>
                         <td>${item.Type}</td>
-                        <td><div class="path-text" title="${item.Path}">${item.Path}</div></td>
                         <td>${resultTag}</td>
                     </tr>
                 `;
@@ -2753,52 +2736,6 @@
 
         function toggleCheck(idx, checked) {
             scanResults[idx].Checked = checked;
-        }
-
-        // 从扫描项名称提取软件关键词（用于智能卸载匹配注册表DisplayName）
-        function extractKeyword(name) {
-            if (!name) return '';
-            // 360系列 → "360"
-            if (/360/i.test(name)) return '360';
-            // 2345系列 → "2345"
-            if (/2345/i.test(name)) return '2345';
-            // 腾讯电脑管家
-            if (/qqpcmgr|qq管家|电脑管家|tencent/i.test(name)) return '电脑管家';
-            // 金山毒霸
-            if (/kingsoft|金山|duba/i.test(name)) return '金山';
-            // 百度
-            if (/baidu|百度/i.test(name)) return '百度';
-            // 火绒
-            if (/huorong|火绒/i.test(name)) return '火绒';
-            // 瑞星
-            if (/rising|瑞星/i.test(name)) return '瑞星';
-            // 卡巴斯基
-            if (/kaspersky|卡巴/i.test(name)) return '卡巴斯基';
-            // McAfee
-            if (/mcafee/i.test(name)) return 'McAfee';
-            // 其他：去掉后缀，取前8个字符
-            return name.replace(/\.(exe|dll|sys)$/i, '').substring(0, 8);
-        }
-
-        // 智能卸载：调用软件自带卸载程序
-        async function smartUninstall(keyword) {
-            showConfirm('智能卸载',
-                `将启动「${keyword}」自带的卸载程序，请在弹出的窗口中完成卸载。<br><br>卸载完成后，深澈会自动扫描并清理残留。<br><span style="color:#FF7D00;">⚠️ 如果卸载程序有"保留用户数据"选项，建议取消勾选。</span>`,
-                async () => {
-                    try {
-                        document.getElementById('footerStatus').textContent = '正在启动卸载程序...';
-                        const res = JSON.parse(await bridge.SmartUninstall(keyword));
-                        if (res.success) {
-                            showAlert('请完成卸载', res.message + '<br><br>卸载完成后点击"确定"，深澈将自动扫描残留。', '📦');
-                            // 卸载完成后自动重新扫描
-                            setTimeout(() => { startScan(); }, 500);
-                        } else {
-                            showAlert('智能卸载', res.message, '⚠️');
-                        }
-                    } catch (e) {
-                        showAlert('智能卸载失败', e.message, '❌');
-                    }
-                }, '🔧');
         }
 
         function selectAll() {
@@ -2821,16 +2758,36 @@
                 return;
             }
 
-            showConfirm('确认清理', `确定要清理选中的 ${selected.length} 个项目吗？<br><br><span style="color: #FF7D00;">⚠️ 清理有风险，软件会自动备份，清理后可撤销，建议确认选中项无误后再继续。</span>`, async () => {
+            // 检测选中项中是否有自我保护软件，提前告知用户
+            const protectedFamilies = new Set();
+            scanResults.filter(item => item.Checked).forEach(item => {
+                const haystack = (item.Name + ' ' + item.Path + ' ' + item.Description).toLowerCase();
+                ['360安全卫士','360safe','360tray','360antihacker','360selfprotection','zhudongfangyu','金山毒霸','duba','kxescore','kwsprotect','腾讯电脑管家','qqpcmgr','qqpcrtp','2345安全卫士','2345safe','鲁大师','ludashi','lnms','瑞星','rising','ravmond','江民','jiangmin','kvmonxp','卡巴斯基','kaspersky','avp','mcafee','mcshield','norton','ccsvchst'].forEach(f => {
+                    if (haystack.includes(f.toLowerCase())) protectedFamilies.add(f);
+                });
+            });
+
+            let confirmMsg = `确定要清理选中的 ${selected.length} 个项目吗？<br><br><span style="color: #FF7D00;">⚠️ 清理有风险，软件会自动备份，清理后可撤销，建议确认选中项无误后再继续。</span>`;
+            if (protectedFamilies.size > 0) {
+                const names = Array.from(protectedFamilies).map(f => {
+                    const map = {'360安全卫士':'360安全卫士','360safe':'360安全卫士','360tray':'360安全卫士','360antihacker':'360安全卫士','360selfprotection':'360安全卫士','zhudongfangyu':'360安全卫士','金山毒霸':'金山毒霸','duba':'金山毒霸','kxescore':'金山毒霸','kwsprotect':'金山毒霸','腾讯电脑管家':'腾讯电脑管家','qqpcmgr':'腾讯电脑管家','qqpcrtp':'腾讯电脑管家','2345安全卫士':'2345安全卫士','2345safe':'2345安全卫士','鲁大师':'鲁大师','ludashi':'鲁大师','lnms':'鲁大师','瑞星':'瑞星','rising':'瑞星','ravmond':'瑞星','江民':'江民杀毒','jiangmin':'江民杀毒','kvmonxp':'江民杀毒','卡巴斯基':'卡巴斯基','kaspersky':'卡巴斯基','avp':'卡巴斯基','mcafee':'McAfee','mcshield':'McAfee','norton':'Norton','ccsvchst':'Norton'};
+                    return map[f] || f;
+                });
+                confirmMsg = `检测到 <b>${names.join('、')}</b> 等有自我保护的软件。<br><br>深澈将<b>自动启动其自带卸载程序</b>，请在弹出的窗口中完成卸载，之后深澈会自动清理残留。<br><br>${confirmMsg}`;
+            }
+
+            showConfirm('确认清理', confirmMsg, async () => {
                 const btn = document.getElementById('btnClean');
                 btn.disabled = true;
                 btn.innerHTML = '<span class="loading"></span>清理中';
-                document.getElementById('footerStatus').textContent = '正在清理...';
+                document.getElementById('footerStatus').textContent = protectedFamilies.size > 0
+                    ? '正在启动自带卸载程序，请在弹出窗口中完成卸载...'
+                    : '正在清理...';
 
                 try {
                     const res = JSON.parse(await bridge.Clean(JSON.stringify(selected)));
                     if (res.success) {
-                        const { success, fail, skipped, missing } = res.data;
+                        const { success, fail, skipped, missing, nativeUninstall } = res.data;
                         if (window.Telemetry) Telemetry.track('clean', { success: success, fail: fail, skipped: skipped, missing: missing });
                         res.data.results.forEach(r => {
                             const row = scanResults.find(x =>
@@ -2838,11 +2795,50 @@
                             if (row) row.Result = r.result;
                         });
                         renderTable();
+
+                        // 有自我保护软件时，显示"正在清理残留..."过渡状态
+                        const hasNative = nativeUninstall && nativeUninstall.length > 0;
+                        if (hasNative) {
+                            document.getElementById('footerStatus').textContent = '正在清理残留...';
+                            await new Promise(r => setTimeout(r, 300));
+                        }
+
+                        const totalCleaned = success + missing; // 成功 + 已被自带卸载清理的都算清理完成
                         document.getElementById('footerStatus').textContent =
-                            `完成：成功${success} 失败${fail} 跳过${skipped} 未找到${missing}`;
-                        showAlert('清理完成',
-                            `成功: ${success} 个<br>失败: ${fail} 个<br>跳过: ${skipped} 个<br>未找到(已跳过): ${missing} 个<br><br>部分被占用的文件将在重启后删除。`,
-                            '✅');
+                            `清理完成：${totalCleaned} 项已处理${fail > 0 ? '，' + fail + ' 项失败' : ''}`;
+
+                        // 简化结果提示：只说关键数字，失败才显示详情
+                        let resultMsg = `<b>${totalCleaned}</b> 项已清理完成`;
+                        if (fail > 0) {
+                            resultMsg += `<br><span style="color:#E5484D;">${fail} 项清理失败</span>`;
+                            // 失败项详情
+                            const failedItems = res.data.results.filter(r => r.result.startsWith('失败'));
+                            if (failedItems.length > 0) {
+                                resultMsg += '<br><br>失败项：';
+                                failedItems.forEach(r => {
+                                    resultMsg += `<br>• ${r.name}：${r.result.replace('失败: ', '')}`;
+                                });
+                            }
+                        }
+                        if (hasNative) {
+                            // 自带卸载结果只显示简短版，去掉技术细节（JsBridge用"；"连接多个家族结果）
+                            const nativeShort = nativeUninstall.split('；').map(s => {
+                                if (!s || s.trim().length === 0) return null;
+                                if (s.includes('已完成')) return '✓ 自带卸载已完成';
+                                if (s.includes('未完成')) return '⚠ 自带卸载未完成，已强制清理';
+                                if (s.includes('启动失败')) return '⚠ 自带卸载启动失败，已强制清理';
+                                if (s.includes('超时')) return '⚠ 自带卸载超时，已强制清理';
+                                if (s.includes('异常')) return '⚠ 自带卸载异常，已强制清理';
+                                return s.trim();
+                            }).filter(s => s !== null).join('<br>');
+                            resultMsg += `<br><br>${nativeShort}`;
+                        }
+                        resultMsg += '<br><br><span style="color:#888;font-size:13px;">部分文件需重启后彻底删除</span>';
+
+                        showAlert('清理完成', resultMsg, fail > 0 ? '⚠️' : '✅');
+
+                        // 自动重新扫描，确认清理结果（已删除的服务会被自动跳过）
+                        setTimeout(() => { startScan(); }, 1500);
                     } else {
                         showAlert('清理失败', res.error, '❌');
                     }
