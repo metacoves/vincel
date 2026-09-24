@@ -1,6 +1,6 @@
 # 深澈 Vincel
 
-**专注于"驻留项与残留"清理的 Windows 工具——通用卸载器覆盖不到的那一类问题。**
+**专注于“驻留项类”组件的 Windows 清理工具：启动项、系统服务、计划任务、浏览器劫持、右键菜单残留，以及卸载不完全留下的残留。**
 
 [English](README.md) · 官网：https://vincel.netlify.app/ · [下载](https://github.com/metacoves/vincel/releases)
 
@@ -24,7 +24,7 @@
 
 在国内 Windows 生态里，相当一部分不需要的软件是以"捆绑安装/预装"形式进来的，并通过启动项和服务长期驻留；而通用卸载器及其特征库并不针对这个生态。
 
-深澈瞄准的就是这个缺口：扫描驻留项与已知的捆绑/预装软件家族，以管理员权限清理，并且**清理前自动备份，误删可还原**。
+深澈瞄准的就是这个缺口，并针对国内 Windows 生态专门优化：扫描驻留项与已知的捆绑/预装软件家族，以管理员权限清理，并且**清理前自动备份（备份范围内）的操作，多数改动可以还原**。
 
 ## 界面
 
@@ -46,8 +46,7 @@
 
 - 以管理员权限清理上述项目（删除失败时提供强制删除兜底）
 - 对**有驱动自我保护的软件家族**（国内安全类软件常见），不直接删文件，而是**调用厂商自带卸载程序**，等待用户完成卸载向导后自动重扫并清理残留
-- **清理前自动备份**：文件、目录、注册表值/键、计划任务；支持一键还原上次清理
-- 超大文件会跳过备份，避免占用过多磁盘
+- **清理前自动备份**：文件、目录、注册表值/键、计划任务；支持一键还原上次清理。单文件超过 100MB、单次备份总量超过 2GB 的内容会跳过，以控制磁盘占用
 
 **监控（仅提醒，不拦截）**
 
@@ -65,7 +64,7 @@
 |---|---|
 | 界面 | `wwwroot/index.html`（WebView2 渲染，纯 HTML/JS） |
 | 外壳 | C# WinForms，.NET Framework 4.7.2，AnyCPU |
-| 前后端通信 | `JsBridge.cs` + `LocalWebServer.cs`（本地 HTTP） |
+| 前后端通信 | 通过 `AddHostObjectToScript` 向 WebView2 暴露 `JsBridge.cs`；`LocalWebServer.cs` 提供本地界面资源 |
 | 扫描/清理 | `Scanner.cs`、`Cleaner.cs`、`Signatures.cs`、`BackupManager.cs` |
 | 监控 | `InstallWatcher.cs`、`PopupCounter.cs`、`FloatingBall.cs`、`AutoStartHelper.cs` |
 | 遥测/样本上传 | 腾讯云 CloudBase（云函数 + 文档数据库），设备 ID 本地存储 |
@@ -95,8 +94,9 @@
 
 ## 隐私
 
-- 匿名遥测（版本、功能使用次数）——**可在设置中关闭**，不含任何个人数据
+- 匿名遥测字段：随机生成的设备 ID、应用版本、系统版本、功能使用事件；**可在设置中关闭**；不采集文件内容、文件路径或个人信息
 - 设备 ID 本地存储：`%LOCALAPPDATA%\RogueCleaner\device_id.txt`
+- 用户主动提交的样本（可选）：用户填写的软件名称、问题描述、路径，与匿名设备 ID 关联
 - 诊断日志**仅本地**（`%LOCALAPPDATA%\RogueCleaner\clean.log`），从不上传
 - 隐私声明：https://vincel.netlify.app/privacy.html
 

@@ -1,6 +1,6 @@
 # Vincel (深澈)
 
-**A Windows cleanup utility focused on persistence and leftover removal — the category general-purpose uninstallers don't cover.**
+**A Windows cleanup utility focused on persistence-oriented components: startup entries, services, scheduled tasks, browser hijacks, context-menu remnants, and leftovers left behind after partial uninstalls.**
 
 [中文文档](README.zh-CN.md) · Official site: https://vincel.netlify.app/ · [Download](https://github.com/metacoves/vincel/releases)
 
@@ -24,7 +24,7 @@ General-purpose uninstallers (Geek Uninstaller, Bulk Crap Uninstaller, Revo, etc
 
 In the Chinese Windows ecosystem a large share of unwanted software arrives as bundled or pre-installed components, and it persists through startup entries and services. Off-the-shelf uninstallers — and their signature databases — are not tuned for that ecosystem.
 
-Vincel targets this gap: it scans persistence points and known bundled/pre-installed software families, cleans them with administrator privileges, and **backs everything up automatically so changes can be undone**.
+Vincel targets this gap specifically in the Chinese Windows ecosystem: it scans persistence points and known bundled/pre-installed software families, cleans them with administrator privileges, and **backs up supported cleanup operations automatically, so many changes can be restored**.
 
 ## Interface
 
@@ -46,8 +46,7 @@ Vincel targets this gap: it scans persistence points and known bundled/pre-insta
 
 - Removes the items above (force-delete fallback), running as administrator
 - For **self-protected software families** that guard their files/registry with drivers (common among Chinese security suites), it launches the vendor's own uninstaller instead of deleting files directly, waits for the wizard to finish, then re-scans and removes leftovers automatically
-- **Automatic backup before cleaning**: files, directories, registry values/keys, scheduled tasks — one-click restore of the last cleanup
-- Ultra-large files are skipped during backup to bound disk usage
+- **Automatic backup before cleaning**: files, directories, registry values/keys, and scheduled tasks, with one-click restore of the last cleanup. Files over 100 MB and runs exceeding 2 GB of backed-up data are skipped to bound disk usage
 
 **Monitoring (notification only)**
 
@@ -65,7 +64,7 @@ Vincel targets this gap: it scans persistence points and known bundled/pre-insta
 |---|---|
 | UI | `wwwroot/index.html` rendered in WebView2 (plain HTML/JS) |
 | Shell | C# WinForms, .NET Framework 4.7.2, AnyCPU |
-| Front-end ⇄ back-end | `JsBridge.cs` over `LocalWebServer.cs` (local HTTP) |
+| Front-end ⇄ back-end | `JsBridge.cs`, exposed to WebView2 via `AddHostObjectToScript`; `LocalWebServer.cs` serves the local UI assets |
 | Scanning / cleaning | `Scanner.cs`, `Cleaner.cs`, `Signatures.cs`, `BackupManager.cs` |
 | Monitoring | `InstallWatcher.cs`, `PopupCounter.cs`, `FloatingBall.cs`, `AutoStartHelper.cs` |
 | Telemetry / sample upload | Tencent CloudBase (cloud functions + document DB), anonymous device id stored locally |
@@ -95,8 +94,9 @@ Prerequisites:
 
 ## Privacy
 
-- Anonymous telemetry (version, feature usage counts) — **can be disabled in settings**, no personal data
+- Anonymous telemetry fields: a randomly generated device id, app version, OS version, and feature-usage events. It **can be disabled in settings**; no file contents, file paths, or personal identifiers are collected.
 - Device id stored locally: `%LOCALAPPDATA%\RogueCleaner\device_id.txt`
+- Optional user-initiated sample upload: the software name, description, and file path entered by the user, linked to the anonymous device id
 - Diagnostic log is **local only** (`%LOCALAPPDATA%\RogueCleaner\clean.log`) and is never uploaded
 - Privacy statement: https://vincel.netlify.app/privacy.html
 
